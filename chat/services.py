@@ -18,6 +18,11 @@ def get_secrets():
 
 secrets = get_secrets()
 HF_TOKEN = secrets["HF_TOKEN"] 
+print(f"HF_TOKEN loaded: {HF_TOKEN[:10]}...") 
+
+from huggingface_hub import login
+login(token=HF_TOKEN)
+
 
 MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
 
