@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   backend:
-    container_name: creator-monk
+    container_name: creator-monk-dev
     build: .
     ports:
       - "8001:8000"

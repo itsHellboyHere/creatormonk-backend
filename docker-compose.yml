@@ -2,11 +2,8 @@ version: '3.8'
 
 services:
   backend:
-    container_name: creator-monk-dev
+    container_name: creator-monk
     build: .
     ports:
       - "8001:8000"
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - DEBUG=${DEBUG}
     restart: unless-stopped
