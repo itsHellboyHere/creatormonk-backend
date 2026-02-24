@@ -13,11 +13,20 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import json
+import boto3
+
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+def get_secrets():
+    client = boto3.client("secretsmanager", region_name="ap-south-1")
+    secret = client.get_secret_value(SecretId="creatormonk/backend")
+    return json.loads(secret["SecretString"])
+
+secrets = get_secrets()
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -26,7 +35,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-b!cs5c$2wsg#4j&^=)--kjaebtc*!k5zhwp_l*0awlsyav(m_a'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "True") == "True"
+DEBUG = secrets["DEBUG"] == "True"
 
 ALLOWED_HOSTS = ["*"]
 

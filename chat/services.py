@@ -2,8 +2,18 @@ import os
 from openai import OpenAI
 from sentence_transformers import SentenceTransformer, util
 from dotenv import load_dotenv
+import boto3
+import json
 
 load_dotenv()
+def get_secrets():
+    client = boto3.client("secretsmanager", region_name="ap-south-1")
+    secret = client.get_secret_value(SecretId="creatormonk/backend")
+    return json.loads(secret["SecretString"])
+
+secrets = get_secrets()
+HF_TOKEN = secrets["HF_TOKEN"]
+DEBUG = secrets["DEBUG"]
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct"
