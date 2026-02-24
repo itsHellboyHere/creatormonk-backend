@@ -7,6 +7,16 @@ import json
 
 load_dotenv()
 def get_secrets():
+    # If running locally, fall back to .env
+    if os.getenv("ENV") == "local":
+        from dotenv import load_dotenv
+        load_dotenv()
+        return {
+            "HF_TOKEN": os.getenv("HF_TOKEN"),
+            "DEBUG": os.getenv("DEBUG", "True")
+        }
+    
+    # On AWS — fetch from Secrets Manager
     client = boto3.client("secretsmanager", region_name="ap-south-1")
     secret = client.get_secret_value(SecretId="creatormonk/backend")
     return json.loads(secret["SecretString"])
