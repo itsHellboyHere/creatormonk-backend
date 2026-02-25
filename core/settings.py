@@ -37,7 +37,7 @@ SECRET_KEY = 'django-insecure-b!cs5c$2wsg#4j&^=)--kjaebtc*!k5zhwp_l*0awlsyav(m_a
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = secrets["DEBUG"] == "True"
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = ["api.creatormonk.in", "localhost", "127.0.0.1"]
 
 
 # Application definition
@@ -137,3 +137,14 @@ CORS_ALLOWED_ORIGINS = [
     "https://creatormonk.in",
     "https://www.creatormonk.in",
 ]
+
+
+# DRF Rate Limiting
+# REST_FRAMEWORK = {
+#     'DEFAULT_THROTTLE_CLASSES': [
+#         'rest_framework.throttling.AnonRateThrottle',
+#     ],
+#     'DEFAULT_THROTTLE_RATES': {
+#         'anon': '30/hour',  # 30 requests per hour per IP
+#     }
+# }
