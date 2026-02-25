@@ -19,5 +19,7 @@ jobs:
           script: |
             cd ~/creatormonk-backend
             git pull origin main
+            docker stop creator-monk || true
+            docker rm creator-monk || true
             docker-compose down
             docker-compose up -d --build
