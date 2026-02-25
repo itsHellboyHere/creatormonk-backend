@@ -19,7 +19,5 @@ jobs:
           script: |
             cd ~/creatormonk-backend
             git pull origin main
-            docker build -t creator-monk .
-            docker stop creator-monk || true
-            docker rm creator-monk || true
-            docker run -d --name creator-monk -p 8001:8000 creator-monk
+            docker-compose down
+            docker-compose up -d --build
