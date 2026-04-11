@@ -37,7 +37,7 @@ client = OpenAI(
 documents = [
 
     # ─────────────────────────────────────────
-    # BRAND IDENTITY — ENGLISH
+    # BRAND IDENTITY — ENGLISH Style
     # ─────────────────────────────────────────
     "CreatorMonk is a full-stack digital agency founded in 2025.",
     "CreatorMonk is based in India and works with clients across the country.",
