@@ -14,8 +14,9 @@ EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 TOP_K = 5
 THRESHOLD = 0.32
-MAX_HISTORY_TURNS = 6      # 3 exchanges — enough context, cheap tokens
-MAX_TOKENS = 170           # short answers are the whole point
+MAX_HISTORY_TURNS = 6
+MAX_TOKENS = 120
+MAX_SENTENCES = 3
 
 _client = OpenAI(
     base_url=settings.LLM_BASE_URL,
@@ -23,6 +24,7 @@ _client = OpenAI(
     timeout=25.0,
     max_retries=1,
 )
+
 
 @lru_cache(maxsize=1)
 def _engine():
@@ -42,7 +44,7 @@ HINGLISH_HINTS = {
     "karte", "karta", "karna", "chahiye", "sakte", "sakta", "mujhe", "aap", "aapka",
     "apna", "nahi", "haan", "acha", "accha", "bhai", "batao", "bata", "kaam",
     "milega", "banate", "banata", "banao", "chalta", "hoga", "wala", "lagta",
-    "lagega", "shuru", "paisa", "paise", "matlab", "thik", "theek",
+    "lagega", "shuru", "paisa", "paise", "matlab", "thik", "theek", "insaan",
 }
 
 
@@ -54,17 +56,87 @@ def detect_language(text: str) -> str:
     return "english"
 
 
-# ---------------------------------------------------------------- contact detection
+def _wa():
+    return settings.WHATSAPP_NUMBER.removeprefix("91")
+
+
+# ---------------------------------------------------------------- intents
+# Some messages have nothing to retrieve. Answering them from the knowledge
+# base produces the wrong reply every time, so handle them directly.
+
+GREETING_RE = re.compile(
+    r"^\s*(hi+|hey+|hello+|yo|namaste|namaskar|salaam|हाय|हैलो|नमस्ते)[\s!.,]*$",
+    re.I,
+)
+
+GOODBYE_RE = re.compile(
+    r"^\s*(bye+|goodbye|good bye|see ya|see you|tata|ta ta|alvida|"
+    r"ok bye|okay bye|thanks bye|thank you bye|"
+    r"अलविदा|बाय)[\s!.,]*$",
+    re.I,
+)
+
+THANKS_RE = re.compile(
+    r"^\s*(thanks|thank you|thx|ty|shukriya|dhanyavad|dhanyawad|"
+    r"धन्यवाद|शुक्रिया)[\s!.,]*$",
+    re.I,
+)
+
+HUMAN_RE = re.compile(
+    r"(talk|speak|connect|chat)\s+(to|with)\s+(a\s+)?(human|person|someone|"
+    r"real\s+person|agent|team)|human\s+(agent|support)|"
+    r"real\s+person|insaan\s+se|kisi\s+se\s+baat|team\s+se\s+baat|"
+    r"इंसान|असली\s+व्यक्ति",
+    re.I,
+)
+
+
+CANNED = {
+    "greeting": {
+        "english": "Hey! What are you looking to build?",
+        "hinglish": "Hey! Kya banwana chahte ho?",
+        "hindi": "नमस्ते! आप क्या बनवाना चाहते हैं?",
+    },
+    "goodbye": {
+        "english": "Thanks for stopping by! WhatsApp us at +91 {wa} whenever you're ready.",
+        "hinglish": "Milke accha laga! Jab bhi ready ho, +91 {wa} par WhatsApp kar dena.",
+        "hindi": "मिलकर अच्छा लगा! जब भी तैयार हों, +91 {wa} पर WhatsApp कर दें।",
+    },
+    "thanks": {
+        "english": "Anytime! Anything else you'd like to know?",
+        "hinglish": "Anytime! Aur kuch jaanna hai?",
+        "hindi": "कभी भी! और कुछ जानना है?",
+    },
+    "human": {
+        "english": "Of course — WhatsApp is fastest: +91 {wa}. You can also email {email}.",
+        "hinglish": "Bilkul — WhatsApp sabse fast hai: +91 {wa}. Ya {email} par mail kar do.",
+        "hindi": "बिलकुल — WhatsApp सबसे तेज़ है: +91 {wa}। या {email} पर मेल कर दें।",
+    },
+}
+
+
+def detect_intent(text: str):
+    t = text.strip()
+    if HUMAN_RE.search(t):
+        return "human"
+    if GREETING_RE.match(t):
+        return "greeting"
+    if GOODBYE_RE.match(t):
+        return "goodbye"
+    if THANKS_RE.match(t):
+        return "thanks"
+    return None
+
+
+# ---------------------------------------------------------------- contact
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]{2,}")
-# Indian mobile: optional +91/0, then 10 digits starting 6-9
 PHONE_RE = re.compile(r"(?:\+?91[\s-]?|0)?[6-9]\d{9}\b")
 
 
 def extract_contact(text: str):
-    """Returns {'email': str|None, 'phone': str|None} found in the text."""
-    cleaned = re.sub(r"[\s()-]", "", text)
-    email = EMAIL_RE.search(text)
+    cleaned = re.sub(r"[\s()-]", "", text or "")
+    email = EMAIL_RE.search(text or "")
     phone = PHONE_RE.search(cleaned)
     return {
         "email": email.group(0) if email else None,
@@ -73,7 +145,6 @@ def extract_contact(text: str):
 
 
 def contact_from_history(history, question):
-    """Scan the whole conversation so we never ask twice."""
     found = {"email": None, "phone": None}
     for turn in list(history) + [{"role": "user", "text": question}]:
         if turn.get("role") != "user":
@@ -87,9 +158,9 @@ def contact_from_history(history, question):
 # ---------------------------------------------------------------- fallbacks
 
 FALLBACKS = {
-    "english": "I don't have that one — message us on WhatsApp at +91 {wa} or email {email} and the team will reply.",
-    "hinglish": "Ye baat mere paas nahi hai — +91 {wa} par WhatsApp karo ya {email} par mail bhejo, team reply kar degi.",
-    "hindi": "यह जानकारी मेरे पास नहीं है — +91 {wa} पर WhatsApp करें या {email} पर ईमेल करें, टीम जवाब देगी।",
+    "english": "I don't have that one — WhatsApp us at +91 {wa} or email {email} and the team will reply.",
+    "hinglish": "Ye baat mere paas nahi hai — +91 {wa} par WhatsApp karo ya {email} par mail bhejo.",
+    "hindi": "यह जानकारी मेरे पास नहीं है — +91 {wa} पर WhatsApp करें या {email} पर ईमेल करें।",
 }
 
 BUSY = {
@@ -100,10 +171,7 @@ BUSY = {
 
 
 def _fill(t):
-    return t.format(
-        wa=settings.WHATSAPP_NUMBER.removeprefix("91"),
-        email=settings.CONTACT_EMAIL,
-    )
+    return t.format(wa=_wa(), email=settings.CONTACT_EMAIL)
 
 
 # ---------------------------------------------------------------- retrieval
@@ -111,20 +179,17 @@ def _fill(t):
 FOLLOW_UPS = {
     "yes", "yeah", "yep", "ok", "okay", "sure", "haan", "han", "ha", "hmm",
     "thik", "theek", "achha", "acha", "sahi", "done", "please", "plz",
-    "tell me more", "more", "aur batao", "batao",
+    "more", "batao", "aur batao",
 }
 
 
 def build_query(question: str, history) -> str:
-    """A bare 'yeah' retrieves nothing useful. Anchor short replies to the
-    last real question so retrieval still has something to work with."""
     q = question.strip()
     if len(q.split()) > 3 and q.lower() not in FOLLOW_UPS:
         return q
-
     for turn in reversed(history):
         if turn.get("role") == "user":
-            prev = turn.get("text", "").strip()
+            prev = (turn.get("text") or "").strip()
             if len(prev.split()) > 3:
                 return f"{prev} {q}"
     return q
@@ -143,33 +208,47 @@ def retrieve(query: str):
     return [d for d, _ in hits]
 
 
+# ---------------------------------------------------------------- trimming
+
+SENT_SPLIT = re.compile(r"(?<=[.!?।])\s+")
+
+
+def trim(text: str, limit: int = MAX_SENTENCES) -> str:
+    """The prompt asks for short answers; this guarantees them."""
+    text = (text or "").strip()
+    parts = [p for p in SENT_SPLIT.split(text) if p.strip()]
+    if len(parts) <= limit:
+        return text
+    return " ".join(parts[:limit]).strip()
+
+
 # ---------------------------------------------------------------- prompt
 
 SYSTEM_PROMPT = """You are the assistant on CreatorMonk's website — a web, AI and automation agency in Greater Noida, India.
 
-LENGTH — this matters most:
-Answer in 2 sentences. 3 only if truly needed. Never write a paragraph. Never use bullet points. Ask at most ONE question at the end, and only if it moves things forward. Short answers feel confident; long ones feel like a brochure.
+LENGTH — the single most important rule:
+Maximum 2 sentences. Never 3. Never a paragraph, never bullet points. Ask at most ONE short question, and only when it genuinely moves things forward. If you can answer in one sentence, do.
+
+ANSWER THE ACTUAL MESSAGE:
+Respond to what the visitor just said, not to something earlier in the conversation. Never repeat a reply you have already given.
 
 FACTS:
-Use only the CONTEXT below. Do not invent services, platforms, tools, timelines, guarantees or claims. If a platform, service or detail is not in the CONTEXT, do not mention it. If the CONTEXT doesn't cover the question, say you don't have that detail and point to WhatsApp or email.
+Use only the CONTEXT. Never invent services, platforms, tools, timelines, guarantees or claims. If something is not in the CONTEXT, do not mention it. If the CONTEXT doesn't cover the question, say you don't have that detail and point to WhatsApp or email.
 
 WHAT YOU CANNOT DO:
-You cannot book calls, check calendars, send emails or access any system. Never say "I'll schedule", "let me arrange" or "I'll have someone call you at a time that suits you". You can only say the team will reach out.
+You cannot book calls, check calendars, send emails or access any system. Never say "I'll schedule", "let me arrange", or "I'll have someone call you at a time that suits you". Only say the team will reach out.
 
 PRICING:
 Never give a price, range, estimate or comparison — not even "depends on size" or "starts from". Say every project is different and a clear quote comes after a short call.
 
-CONTACT DETAILS:
-If the conversation already contains the visitor's email or phone number, thank them once, confirm the team will reach out, and NEVER ask for contact details again. Only ask for a contact detail if none has been given and the visitor is clearly interested.
-
 LANGUAGE — match the visitor exactly:
-Devanagari Hindi -> reply in Devanagari Hindi. Hinglish -> reply in Hinglish, casual and natural. English -> reply in English. Never mix scripts in one reply.
+Devanagari Hindi -> Devanagari Hindi. Hinglish -> Hinglish, casual and natural. English -> English. Never mix scripts in one reply.
 
 TONE:
 Warm, plain, honest. Never salesy."""
 
 
-def generate_answer(question, docs, lang, history, contact):
+def generate_answer(question, docs, lang, history, contact, contact_is_new):
     context = "\n".join(f"- {d}" for d in docs)
 
     lang_note = {
@@ -178,24 +257,25 @@ def generate_answer(question, docs, lang, history, contact):
         "english": "Visitor wrote in English. Reply in English.",
     }[lang]
 
-    if contact["email"] or contact["phone"]:
-        given = " and ".join(
-            p for p in [
-                f"email ({contact['email']})" if contact["email"] else None,
-                f"phone ({contact['phone']})" if contact["phone"] else None,
-            ] if p
-        )
+    if contact_is_new:
         contact_note = (
-            f"IMPORTANT: The visitor has ALREADY shared their {given}. "
-            "Thank them briefly, confirm the team will reach out soon, and do NOT ask "
-            "for an email or phone number again under any circumstances."
+            "The visitor just shared their contact details in THIS message. "
+            "Thank them in one short sentence and say the team will reach out. Nothing more."
+        )
+    elif contact["email"] or contact["phone"]:
+        contact_note = (
+            "The visitor already shared contact details earlier in this conversation. "
+            "Do NOT ask for an email or phone number again, and do NOT thank them for it "
+            "again — that was already done. Just answer their current message normally."
         )
     else:
-        contact_note = "The visitor has not shared contact details yet."
+        contact_note = (
+            "No contact details shared yet. If — and only if — the visitor seems ready to "
+            "start, you may ask once for an email or phone number."
+        )
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
-    # replay recent turns so the model actually remembers the conversation
     for turn in history[-MAX_HISTORY_TURNS:]:
         role = "assistant" if turn.get("role") == "bot" else "user"
         text = (turn.get("text") or "").strip()
@@ -208,7 +288,7 @@ def generate_answer(question, docs, lang, history, contact):
             f"{lang_note}\n{contact_note}\n\n"
             f"CONTEXT:\n{context}\n\n"
             f"VISITOR: {question}\n\n"
-            "Reply in 2 sentences maximum."
+            "Reply in 2 sentences maximum. Answer this message specifically."
         ),
     })
 
@@ -216,10 +296,11 @@ def generate_answer(question, docs, lang, history, contact):
         model=settings.LLM_MODEL,
         messages=messages,
         max_tokens=MAX_TOKENS,
-        temperature=0.4,
-        presence_penalty=0.3,
+        temperature=0.3,
+        presence_penalty=0.4,
+        frequency_penalty=0.4,
     )
-    return res.choices[0].message.content.strip()
+    return trim(res.choices[0].message.content)
 
 
 # ---------------------------------------------------------------- public API
@@ -232,7 +313,23 @@ def chat(question: str, history=None) -> dict:
     if not question:
         return {"answer": _fill(FALLBACKS[lang]), "language": lang, "grounded": False}
 
+    contact_now = extract_contact(question)
+    contact_is_new = bool(contact_now["email"] or contact_now["phone"])
     contact = contact_from_history(history, question)
+
+    # Fixed replies for messages the knowledge base can't help with.
+    # Skipped when the visitor also handed over a phone/email in the same line.
+    if not contact_is_new:
+        intent = detect_intent(question)
+        if intent:
+            logger.info("intent=%s lang=%s", intent, lang)
+            return {
+                "answer": _fill(CANNED[intent][lang]),
+                "language": lang,
+                "grounded": True,
+                "intent": intent,
+                "contact": contact,
+            }
 
     try:
         docs = retrieve(build_query(question, history))
@@ -240,33 +337,21 @@ def chat(question: str, history=None) -> dict:
         logger.exception("Retrieval failed")
         return {"answer": _fill(BUSY[lang]), "language": lang, "grounded": False}
 
-    # If they just handed over contact details, we don't need the KB at all —
-    # and we must not let the model wander off into a fresh pitch.
-    if (contact["email"] or contact["phone"]) and not docs:
+    if contact_is_new and not docs:
         thanks = {
-            "english": "Got it — thanks! The team will reach out to you shortly.",
-            "hinglish": "Mil gaya, thanks! Team jaldi aapse contact karegi.",
-            "hindi": "मिल गया, धन्यवाद! टीम जल्द ही आपसे संपर्क करेगी।",
+            "english": "Got it — thanks! The team will reach out shortly.",
+            "hinglish": "Mil gaya, thanks! Team jaldi contact karegi.",
+            "hindi": "मिल गया, धन्यवाद! टीम जल्द संपर्क करेगी।",
         }[lang]
-        return {
-            "answer": thanks,
-            "language": lang,
-            "grounded": True,
-            "contact": contact,
-        }
+        return {"answer": thanks, "language": lang, "grounded": True, "contact": contact}
 
     if not docs:
         return {"answer": _fill(FALLBACKS[lang]), "language": lang, "grounded": False}
 
     try:
-        answer = generate_answer(question, docs, lang, history, contact)
+        answer = generate_answer(question, docs, lang, history, contact, contact_is_new)
     except Exception:
         logger.exception("LLM call failed")
         return {"answer": _fill(BUSY[lang]), "language": lang, "grounded": False}
 
-    return {
-        "answer": answer,
-        "language": lang,
-        "grounded": True,
-        "contact": contact,
-    }
+    return {"answer": answer, "language": lang, "grounded": True, "contact": contact}
