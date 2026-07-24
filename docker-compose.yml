@@ -1,9 +1,21 @@
-version: '3.8'
-
 services:
   backend:
     container_name: creator-monk
     build: .
+    env_file:
+      - .env
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - ./data:/app/data
+      - hf_cache:/app/.hf_cache
     restart: unless-stopped
+    mem_limit: 900m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  hf_cache:

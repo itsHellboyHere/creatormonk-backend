@@ -17,9 +17,10 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
           script: |
+            set -e
             cd ~/creatormonk-backend
             git pull origin main
-            docker stop creator-monk || true
-            docker rm creator-monk || true
-            docker-compose down
-            docker-compose up -d --build
+            docker compose down
+            docker compose up -d --build
+            docker compose exec -T backend python manage.py migrate --noinput
+            docker image prune -f
