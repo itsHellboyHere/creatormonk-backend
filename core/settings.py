@@ -19,8 +19,12 @@ DEBUG = env("DEBUG", "False").lower() == "true"
 ALLOWED_HOSTS = [h.strip() for h in env("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")]
 
 # ---- Chat / RAG ----
+# Provider-agnostic: any OpenAI-compatible endpoint works.
+LLM_BASE_URL = env("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+LLM_API_KEY = env("LLM_API_KEY", required=True)
+LLM_MODEL = env("LLM_MODEL", "llama-3.3-70b-versatile")
 HF_TOKEN = env("HF_TOKEN", required=True)
-LLM_MODEL = env("LLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+
 
 # ---- Email ----
 RESEND_API_KEY = env("RESEND_API_KEY")

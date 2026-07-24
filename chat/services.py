@@ -18,12 +18,11 @@ MAX_HISTORY_TURNS = 6      # 3 exchanges — enough context, cheap tokens
 MAX_TOKENS = 170           # short answers are the whole point
 
 _client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=settings.HF_TOKEN,
+    base_url=settings.LLM_BASE_URL,
+    api_key=settings.LLM_API_KEY,
     timeout=25.0,
     max_retries=1,
 )
-
 
 @lru_cache(maxsize=1)
 def _engine():
